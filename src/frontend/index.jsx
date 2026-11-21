@@ -7,7 +7,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import ForgeReconciler, {
-  Badge, Box, Button, DynamicTable, EmptyState, Heading, Inline,
+  Box, Button, DynamicTable, EmptyState, Heading, Inline,
   Lozenge, ProgressBar, SectionMessage, Select,
   Spinner, Stack, Text,
 } from '@forge/react';
@@ -125,9 +125,9 @@ function App() {
               value={analysis.donePercent}
             />
             <Inline space="space.200">
-              <Badge text={`${analysis.byStatus.todo} to do`} />
-              <Badge text={`${analysis.byStatus.inprogress} in progress`} appearance="primary" />
-              <Badge text={`${analysis.byStatus.done} done`} appearance="added" />
+              <Lozenge>{analysis.byStatus.todo} to do</Lozenge>
+              <Lozenge appearance="inprogress">{analysis.byStatus.inprogress} in progress</Lozenge>
+              <Lozenge appearance="success">{analysis.byStatus.done} done</Lozenge>
             </Inline>
           </Box>
 
