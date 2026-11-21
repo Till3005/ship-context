@@ -1,0 +1,205 @@
+modules:
+  jira:globalPage:
+    - key: ship-context-main
+      resource: main
+      resolver:
+        function: resolver
+      render: native
+      title: Ship Context
+      layout: basic
+
+  # Rovo agent: "Release Copilot" answers release-health questions in Rovo Chat.
+  rovo:agent:
+    - key: release-copilot
+      name: Release Copilot
+      description: >
+        Answers questions about release readiness for Jira projects: what is
+        blocking a version, which issues are stale, unestimated or risky, and
+        how the release scores overall.
+      prompt: >
+        You are Release Copilot, a release-management assistant built on Forge.
+        You help engineering teams understand whether a Jira fix version is on
+        track to ship.
+
+        You have three tools: - get-release-status: call this FIRST for any
+        question about a release,
+          version, or shipping. It returns the readiness score, issue counts by
+          status, and headline risk counts for a fix version.
+        - list-release-risks: call this when the user asks what is blocking,
+          stale, risky, or needs attention. It returns the concrete issue list
+          behind the risk counters.
+        - summarize-release: call this when the user asks for a summary, a
+          status report, a standup note, or anything they can paste into a doc
+          or share with a stakeholder.
+
+        Behaviour rules: - If the user does not name a project key or version,
+        ask them which
+          project and version they mean before calling a tool. Never guess.
+        - Always lead with the readiness score and the single most important
+          risk, then list the rest concisely.
+        - Keep answers under 150 words unless the user asks for a detailed
+          report.
+        - When everything looks healthy, say so plainly; do not invent risks.
+      conversationStarters:
+        - How is release 1.0 looking?
+        - What is blocking the release?
+        - Give me a release summary I can paste into my standup notes
+      actions:
+        - get-release-status
+        - list-release-risks
+        - summarize-release
+
+  # MCP: expose the same actions as managed MCP tools on Atlassian's
+  # infrastructure so external MCP clients (and other agents) can invoke them.
+  rovo:mcp:
+    - key: ship-context-mcp
+      name: Ship Context tools
+      tools:
+        - get-release-status
+        - list-release-risks
+        - summarize-release
+
+  action:
+    - key: get-release-status
+      name: Get release status
+      function: releaseStatusFn
+      actionVerb: GET
+      description: >
+        Returns the readiness score (0-100, with grade), issue counts by status
+        category, and counts of risky issues (unresolved blockers, stale work,
+        unestimated items) for a Jira fix version.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: true
+          description: The Jira project key, for example ABC.
+        versionName:
+          title: Version name
+          type: string
+          required: true
+          description: The fix version name, for example 1.0 or v2.4.
+    - key: list-release-risks
+      name: List release risks
+      function: releaseRisksFn
+      actionVerb: GET
+      description: >
+        Lists the issues that threaten a release: unresolved issues linked by a
+        blocker link type, issues not updated recently, unestimated issues and
+        high-priority unfinished items. Returns key, summary, status, risk
+        reason and assignee for each.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: true
+          description: The Jira project key, for example ABC.
+        versionName:
+          title: Version name
+          type: string
+          required: true
+          description: The fix version name, for example 1.0 or v2.4.
+    - key: summarize-release
+      name: Summarize release
+      function: releaseSummaryFn
+      actionVerb: GET
+      description: >
+        Produces a short stakeholder-ready written summary of a release's
+        health: score, completion, top three risks and recommended next actions.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: true
+          description: The Jira project key, for example ABC.
+        versionName:
+          title: Version name
+          type: string
+          required: true
+          description: The fix version name, for example 1.0 or v2.4.
+
+  # Teamwork Graph connector: ingests pull requests from a GitHub repository
+  # so the release context in Jira can be combined with PR state in Rovo.
+  graph:connector:
+    - key: github-prs-connector
+      name: GitHub Pull Requests
+      capabilities:
+        replicatesPermissions: false
+        syncFidelity: upsert
+        supportsIncrementalSync: false
+      icons:
+        light: https://github.githubassets.com/favicons/favicon.png
+        dark: https://github.githubassets.com/favicons/favicon-dark.png
+      objectTypes:
+        - atlassian:repository
+        - atlassian:pull-request
+      datasource:
+        formConfiguration:
+          instructions:
+            - Enter the GitHub repository owner and name, for example facebook /
+              react.
+            - Public repositories need no token. For private repositories,
+              provide a personal access token with repo read access.
+          form:
+            - key: connectionDetails
+              type: header
+              title: GitHub repository
+              description: Pull requests from this repository are ingested into Teamwork
+                Graph.
+              properties:
+                - key: repoOwner
+                  label: Repository owner
+                  type: string
+                  isRequired: true
+                - key: repoName
+                  label: Repository name
+                  type: string
+                  isRequired: true
+                - key: token
+                  label: Personal access token
+                  type: string
+                  isRequired: false
+                  isSensitive: true
+          validateConnection:
+            function: validateConnectionFn
+        onConnectionChange:
+          function: onConnectionChangeFn
+
+  function:
+    - key: resolver
+      handler: index.handler
+    - key: releaseStatusFn
+      handler: index.releaseStatus
+    - key: releaseRisksFn
+      handler: index.releaseRisks
+    - key: releaseSummaryFn
+      handler: index.releaseSummary
+    - key: validateConnectionFn
+      handler: connector.validateConnection
+    - key: onConnectionChangeFn
+      handler: connector.onConnectionChange
+
+resources:
+  - key: main
+    path: src/frontend/index.jsx
+
+app:
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64
+  id: ari:cloud:ecosystem::app/7d2896b1-de95-4065-8036-4441fd4620a5
+
+permissions:
+  scopes:
+    - read:jira-work
+    - read:issue:jira
+    - read:project:jira
+    - read:user:jira
+    - read:object:jira
+    - write:object:jira
+    - delete:object:jira
+  external:
+    fetch:
+      backend:
+        - address: https://api.github.com
